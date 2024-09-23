@@ -110,34 +110,34 @@ func (r *responseStatusCatcher) WriteHeader(status int) {
 }
 
 func runReverseProxy(ctx context.Context, h *client.CommandHelper, stdErr io.Writer, conf *config, name string) error {
-	signer, key, err := newJWTSigner()
-	if err != nil {
-		return err
-	}
-
-	apiKey, removeAPIKey, err := h.TemporaryAPIKey(ctx, fmt.Sprintf("Ory %s temporary API key - %s", name, h.UserName(ctx)))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := removeAPIKey(); err != nil {
-			_, _ = fmt.Fprintf(stdErr, "unable to remove temporary API key, please remove it manually: %s\n", err)
-		}
-	}()
+	// signer, key, err := newJWTSigner()
+	// if err != nil {
+	// 	return err
+	// }
+	//
+	// apiKey, removeAPIKey, err := h.TemporaryAPIKey(ctx, fmt.Sprintf("Ory %s temporary API key - %s", name, h.UserName(ctx)))
+	// if err != nil {
+	// 	return err
+	// }
+	// defer func() {
+	// 	if err := removeAPIKey(); err != nil {
+	// 		_, _ = fmt.Fprintf(stdErr, "unable to remove temporary API key, please remove it manually: %s\n", err)
+	// 	}
+	// }()
 
 	// TODO: we probably don't want to support this in the future, but it requires to be authenticated
-	slug := os.Getenv("ORY_PROJECT_SLUG")
-	if slug == "" {
-		project, err := h.GetSelectedProject(ctx)
-		if err != nil {
-			return err
-		}
-		slug = project.Slug
-	}
-	oryURL := client.CloudAPIsURL(slug + ".projects")
-	oryURL.Host = strings.TrimSuffix(oryURL.Host, ":443")
+	// slug := os.Getenv("ORY_PROJECT_SLUG")
+	// if slug == "" {
+	// 	project, err := h.GetSelectedProject(ctx)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	slug = project.Slug
+	// }
+	// oryURL := client.CloudAPIsURL(slug + ".projects")
+	// oryURL.Host = strings.TrimSuffix(oryURL.Host, ":443")
 
-	writer := herodot.NewJSONWriter(&errorLogger{Writer: stdErr})
+	// writer := herodot.NewJSONWriter(&errorLogger{Writer: stdErr})
 	mw := negroni.New()
 
 	mw.UseFunc(func(w http.ResponseWriter, r *http.Request, n http.HandlerFunc) {
@@ -154,14 +154,15 @@ func runReverseProxy(ctx context.Context, h *client.CommandHelper, stdErr io.Wri
 		n(w, r)
 	})
 
-	if !conf.noJWT {
-		mw.UseFunc(sessionToJWTMiddleware(conf, writer, key, signer, oryURL)) // This must be the last method before the handler
-	}
+	// if !conf.noJWT {
+	// 	mw.UseFunc(sessionToJWTMiddleware(conf, writer, key, signer, oryURL)) // This must be the last method before the handler
+	// }
 
 	var upstream *url.URL
 	if conf.isTunnel {
-		upstream = oryURL
+		// upstream = oryURL
 	} else {
+		var err error
 		upstream, err = url.ParseRequestURI(conf.upstream)
 		if err != nil {
 			return errors.Wrap(err, "unable to parse upstream URL")
@@ -170,16 +171,6 @@ func runReverseProxy(ctx context.Context, h *client.CommandHelper, stdErr io.Wri
 
 	mw.UseHandler(proxy.New(
 		func(ctx context.Context, r *http.Request) (context.Context, *proxy.HostConfig, error) {
-			if conf.isTunnel || strings.HasPrefix(r.URL.Path, conf.pathPrefix) {
-				return ctx, &proxy.HostConfig{
-					CookieDomain:   conf.cookieDomain,
-					UpstreamHost:   oryURL.Host,
-					UpstreamScheme: oryURL.Scheme,
-					TargetHost:     oryURL.Host,
-					PathPrefix:     conf.pathPrefix,
-				}, nil
-			}
-
 			return ctx, &proxy.HostConfig{
 				CookieDomain:   conf.cookieDomain,
 				UpstreamHost:   upstream.Host,
@@ -189,10 +180,11 @@ func runReverseProxy(ctx context.Context, h *client.CommandHelper, stdErr io.Wri
 			}, nil
 		},
 		proxy.WithReqMiddleware(func(r *httputil.ProxyRequest, c *proxy.HostConfig, body []byte) ([]byte, error) {
-			if r.Out.URL.Host == oryURL.Host {
-				r.Out.URL.Path = strings.TrimPrefix(r.Out.URL.Path, conf.pathPrefix)
-				r.Out.Host = oryURL.Host
-			} else if conf.rewriteHost {
+			// if r.Out.URL.Host == oryURL.Host {
+			// 	r.Out.URL.Path = strings.TrimPrefix(r.Out.URL.Path, conf.pathPrefix)
+			// 	r.Out.Host = oryURL.Host
+			// } else if conf.rewriteHost {
+			if conf.rewriteHost {
 				r.Out.Header.Set("X-Forwarded-Host", r.In.Host)
 				r.Out.Host = c.UpstreamHost
 			}
@@ -204,13 +196,16 @@ func runReverseProxy(ctx context.Context, h *client.CommandHelper, stdErr io.Wri
 
 			r.Out.Header.Set("Ory-No-Custom-Domain-Redirect", "true")
 			r.Out.Header.Set("Ory-Base-URL-Rewrite", publicURL.String())
-			if len(apiKey) > 0 {
-				r.Out.Header.Set("Ory-Base-URL-Rewrite-Token", apiKey)
-			}
+			// if len(apiKey) > 0 {
+			// 	r.Out.Header.Set("Ory-Base-URL-Rewrite-Token", apiKey)
+			// }
 
 			return body, nil
 		}),
 		proxy.WithRespMiddleware(func(resp *http.Response, config *proxy.HostConfig, body []byte) ([]byte, error) {
+			// Remove a duplicate CORS headers
+			resp.Header.Del("Access-Control-Allow-Origin")
+			resp.Header.Del("Access-Control-Allow-Credentials")
 			l, err := resp.Location()
 			if err == nil {
 				// Redirect to main page if path is the default ui welcome page.
